@@ -1,0 +1,28 @@
+{
+	"extends": ["eslint:recommended", "plugin:prettier/recommended"],
+	"ignorePatterns": ["/out"],
+	"rules": {
+		"indent": ["warn", "tab"],
+		"max-len": ["warn", { "code": 120 }],
+		"no-trailing-spaces": ["warn"],
+		"no-multiple-empty-lines": ["warn", { "max": 1 }],
+		"semi": ["warn", "always"],
+		"curly": ["warn", "multi-line"],
+		"no-extra-parens": "off",
+		"no-extra-semi": "warn",
+		"no-console": "off",
+		"no-lonely-if": "warn",
+		"eqeqeq": ["error", "smart"],
+		"no-fallthrough": "warn",
+		"object-curly-spacing": ["warn", "always"],
+		"array-bracket-spacing": ["error", "always", { "arraysInArrays": false }],
+		"semi-spacing": ["warn", { "before": false, "after": true }],
+		"endOfLine": "lf",
+		"bracketSpacing": true,
+		"arrowParens": "always",
+		"proseWrap": "always",
+		"require-await": "warn",
+		"no-return-await": "warn",
+		"prettier/prettier": ["error"]
+	}
+}
