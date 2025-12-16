@@ -1,8 +1,8 @@
-type AssetType = "img" | "script" | "code" | "font";
-
+// Max-OS Bootloader
 const VERSION = "v1.0.0 BETA";
 const assets: Asset[] = [];
 
+type AssetType = "img" | "script" | "code" | "font";
 class Asset {
 	path: string;
 	name: string;
@@ -73,14 +73,10 @@ class Asset {
 	}
 
 	private async loadCode() {
-		try {
-			const r = await fetch(this.path);
-			if (!r.ok) throw new Error();
-			this.src = await r.text();
-			this.done = true;
-		} catch {
-			this.retry(() => this.load());
-		}
+		const r = await fetch(this.path);
+		if (!r.ok) this.retry(() => this.load());
+		this.src = await r.text();
+		this.done = true;
 	}
 
 	private loadFont() {
@@ -94,8 +90,20 @@ class Asset {
 			.catch(() => this.retry(() => this.load()));
 	}
 }
-function getAsset(nameOrPath: string) {
-	return assets.find((a) => a.name === nameOrPath || a.path === nameOrPath);
+function getAsset(name: string) {
+	return assets.find((a) => a.name === name || a.path === name);
+}
+async function waitAsset(type: AssetType, url: string, name?: string): Promise<Asset> {
+	const value = getAsset(name ?? url);
+	if (value) {
+		return value;
+	} else {
+		const newValue = new Asset(url, type, name);
+		while (!newValue.done) {
+			await new Promise((res) => setTimeout(res, 100));
+		}
+		return newValue;
+	}
 }
 
 async function boot() {
@@ -105,8 +113,10 @@ async function boot() {
 		const canvas = document.createElement("canvas");
 		canvas.width = 640;
 		canvas.height = 480;
+		canvas.style.imageRendering = "pixelated";
 		const ctx = canvas.getContext("2d");
 		if (!ctx) throw new Error("Canvas 2D nicht verfügbar");
+		ctx.textRendering = "optimizeSpeed";
 
 		const resize = () => {
 			const scale = Math.min(window.innerWidth / 640, window.innerHeight / 480);
@@ -122,12 +132,20 @@ async function boot() {
 	function loadCoreAssets() {
 		new Asset("./out/scripts/main.js", "script");
 		new Asset("./out/scripts/std.js", "script");
+		new Asset("./out/scripts/update.js", "script");
+		new Asset("./out/scripts/render.js", "script");
+		new Asset("./out/scripts/mouse.js", "script");
+		new Asset("./out/scripts/fenster.js", "script");
 		new Asset("./fonts/Roboto-Regular.ttf", "font", "Roboto");
 	}
 	function loadExtraAssets() {
 		new Asset("./fonts/Roboto-Italic.ttf", "font", "Roboto-Italic");
 		new Asset("./fonts/Roboto-Bold.ttf", "font", "Roboto-Bold");
 		new Asset("./fonts/Roboto-BoldItalic.ttf", "font", "Roboto-BoldItalic");
+		new Asset("./icons/Logo.png", "img", "Logo");
+		new Asset("./icons/Minimiren.png", "img", "Minimiren");
+		new Asset("./icons/Maximiren.png", "img", "Maximiren");
+		new Asset("./icons/Schlissen.png", "img", "Schlissen");
 	}
 
 	async function waitForAssets() {
@@ -175,6 +193,22 @@ async function boot() {
 			const loaded = assets.reduce((a, b) => a + (b.done ? 1 : 0), 0);
 			ctx.fillStyle = "rgb(50,50,50)";
 			ctx.fillText(`${loaded} / ${assets.length} Assets loaded`, 4, 4);
+
+			// Allways on Font
+			ctx.textBaseline = "bottom";
+			ctx.fillStyle = "rgb(50,50,50)";
+			ctx.font = "10px Roboto";
+			ctx.fillText((getAsset("Roboto")?.done ? " > " : "X ") + "Roboto", 4, canvas.height - 40);
+			ctx.font = "10px Roboto-Bold";
+			ctx.fillText((getAsset("Roboto-Bold")?.done ? " > " : "X ") + "Roboto-Bold", 4, canvas.height - 28);
+			ctx.font = "10px Roboto-Italic";
+			ctx.fillText((getAsset("Roboto-Italic")?.done ? " > " : "X ") + "Roboto-Italic", 4, canvas.height - 16);
+			ctx.font = "10px Roboto-BoldItalic";
+			ctx.fillText(
+				(getAsset("Roboto-BoldItalic")?.done ? " > " : "X ") + "Roboto-BoldItalic",
+				4,
+				canvas.height - 4,
+			);
 
 			if (elapsed > 2000 && assets.some((a) => !a.done)) {
 				// Core Status
@@ -233,13 +267,13 @@ async function boot() {
 
 		// Title
 		ctx.fillStyle = "rgb(255, 255, 255)";
-		ctx.font = "25px Roboto";
-		ctx.textAlign = "left";
-		ctx.textBaseline = "top";
-		ctx.fillText("Max-OS", 5, 5);
+		ctx.font = "25px Roboto-Bold";
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.fillText("Max-OS", canvas.width / 2, canvas.height / 2);
 
 		// @ts-ignore
-		main(ctx);
+		await main(ctx);
 	} catch (err) {
 		ctx.fillStyle = "black";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
