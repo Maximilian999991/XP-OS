@@ -1,304 +1,442 @@
-// Max-OS Bootloader
-const VERSION = "v1.0.0 BETA";
-const assets: Asset[] = [];
+// @ts-nocheck
+async function main() {
+	// === Messege System ===
+	const messeges: Messege[] = [];
+	class Messege {
+		type: "ok" | "start" | "warn" | "error" | "log" = "start";
+		time = performance.now();
+		sleep = 0;
+		text: string;
 
-type AssetType = "img" | "script" | "code" | "font";
-class Asset {
-	path: string;
-	name: string;
-	type: AssetType;
-	src: HTMLImageElement | HTMLScriptElement | string | FontFace | null = null;
-	done = false;
-	private retryTimer?: number;
+		constructor(text: string) {
+			this.text = text;
+			messeges.push(this);
+		}
 
-	constructor(path: string, type: AssetType, name?: string) {
-		this.path = path;
-		this.name = name ?? path;
-		this.type = type;
-		assets.push(this);
-		this.load();
-	}
+		draw(ctx: CanvasRenderingContext2D, y: number) {
+			const t = this.type === "start" ? performance.now() - this.time : this.sleep;
+			let sleep: string;
+			if (t < 10000) {
+				sleep = "" + Math.floor(t).toString().padStart(4, " ") + "";
+			} else if (t < 1000000) {
+				sleep =
+					"" +
+					Math.floor(t / 1000)
+						.toString()
+						.padStart(3, " ") +
+					"s";
+			} else sleep = ">16m";
 
-	private retry(fn: () => void) {
-		clearTimeout(this.retryTimer);
-		this.retryTimer = window.setTimeout(fn, 1000);
-	}
-
-	load() {
-		this.done = false;
-		try {
 			switch (this.type) {
-				case "img":
-					return this.loadImage();
-				case "script":
-					return this.loadScript();
-				case "code":
-					return this.loadCode();
-				case "font":
-					return this.loadFont();
-				default:
-					throw new Error("Unknown asset type");
+				case "ok":
+					ctx.fillStyle = "green";
+					ctx.fillText("  OK", 5, y);
+					ctx.fillStyle = "white";
+					break;
+				case "start":
+					ctx.fillStyle = "blue";
+					ctx.fillText(" wait", 5, y);
+					ctx.fillStyle = "white";
+					break;
+				case "warn":
+					ctx.fillStyle = "yellow";
+					ctx.fillText(" warn", 5, y);
+					ctx.fillStyle = "yellow";
+					break;
+				case "error":
+					ctx.fillStyle = "red";
+					ctx.fillText(" ERRO", 5, y);
+					ctx.fillStyle = "red";
+					break;
+				case "log":
+					ctx.fillStyle = "white";
+					ctx.fillText(`              ${this.text}`, 5, y);
+					return;
 			}
-		} catch {
-			this.retry(() => this.load());
+			ctx.fillText(`              ${this.text}`, 5, y);
+			ctx.fillStyle = "gray";
+			ctx.fillText(`[    ] (${sleep})`, 5, y);
+		}
+
+		ok(e?: string) {
+			if (!this.sleep) this.sleep = performance.now() - this.time;
+			this.text = this.text + (!e ? "" : " (" + e + ")");
+			this.type = "ok";
+			updateGlobalMes();
+		}
+		warn(e?: string) {
+			this.sleep = performance.now() - this.time;
+			this.text = this.text + (!e ? "" : " (" + e + ")");
+			this.type = "warn";
+			updateGlobalMes();
+		}
+		error(e?: string) {
+			this.sleep = performance.now() - this.time;
+			this.text = this.text + (!e ? "" : " (" + e + ")");
+			this.type = "error";
+			updateGlobalMes();
+		}
+		log() {
+			this.type = "log";
+			updateGlobalMes();
+		}
+	}
+	function updateGlobalMes() {
+		(window as never).output = messeges;
+	}
+
+	// === Setup BodyStyle for Canvas ===
+	function setupBody(): void {
+		const fd = new Messege("Document Body");
+		try {
+			const body = document.body;
+			if (!body) throw new Error("HTMLBody nicht da");
+
+			body.style.background = "black";
+			body.style.overflow = "hidden";
+			body.style.margin = "0px";
+			body.style.padding = "0px";
+
+			fd.ok();
+			return;
+		} catch (e) {
+			fd.error((e as Error).message);
+			throw e;
 		}
 	}
 
-	clear() {
-		const i = assets.indexOf(this);
-		if (i >= 0) assets.splice(i, 1);
-		if (this.src instanceof HTMLElement) this.src.remove();
-		this.src = null;
-		this.done = false;
-	}
-
-	private loadImage() {
-		if (this.src instanceof HTMLImageElement) this.src.remove();
-		const img = new Image();
-		img.onload = () => (this.done = true);
-		img.onerror = () => this.retry(() => this.load());
-		img.src = this.path;
-		this.src = img;
-	}
-
-	private loadScript() {
-		if (this.src instanceof HTMLScriptElement) this.src.remove();
-		const el = document.createElement("script");
-		el.src = this.path;
-		el.async = true;
-		el.onload = () => (this.done = true);
-		el.onerror = () => this.retry(() => this.load());
-		document.body.appendChild(el);
-		this.src = el;
-	}
-
-	private async loadCode() {
-		const r = await fetch(this.path);
-		if (!r.ok) this.retry(() => this.load());
-		this.src = await r.text();
-		this.done = true;
-	}
-
-	private loadFont() {
-		const ff = new FontFace(this.name, `url(${this.path})`);
-		ff.load()
-			.then((loaded) => {
-				document.fonts.add(loaded);
-				this.src = loaded;
-				this.done = true;
-			})
-			.catch(() => this.retry(() => this.load()));
-	}
-}
-function getAsset(name: string) {
-	return assets.find((a) => a.name === name || a.path === name);
-}
-async function waitAsset(type: AssetType, url: string, name?: string): Promise<Asset> {
-	const value = getAsset(name ?? url);
-	if (value) {
-		return value;
-	} else {
-		const newValue = new Asset(url, type, name);
-		while (!newValue.done) {
-			await new Promise((res) => setTimeout(res, 100));
-		}
-		return newValue;
-	}
-}
-
-async function boot() {
-	console.log(`Booting Max-OS ${VERSION} von Maximilian`);
-
+	// === Canvas System ===
 	function createCanvas(): [HTMLCanvasElement, CanvasRenderingContext2D] {
-		const canvas = document.createElement("canvas");
-		canvas.width = 640;
-		canvas.height = 480;
-		canvas.style.imageRendering = "pixelated";
-		const ctx = canvas.getContext("2d");
-		if (!ctx) throw new Error("Canvas 2D nicht verfügbar");
-		ctx.textRendering = "optimizeSpeed";
+		function createElement(): HTMLCanvasElement {
+			const fd = new Messege("Canvas");
+			try {
+				const canvas = document.createElement("canvas");
+				canvas.style.position = "absolute";
+				canvas.style.inset = "0px";
+				canvas.style.zIndex = 2;
+				function resize() {
+					canvas.width = innerWidth;
+					canvas.height = innerHeight;
+				}
+				resize();
+				addEventListener("resize", resize);
+				document.body.appendChild(canvas);
 
-		const resize = () => {
-			const scale = Math.min(window.innerWidth / 640, window.innerHeight / 480);
-			canvas.style.width = `${640 * scale}px`;
-			canvas.style.height = `${480 * scale}px`;
-		};
-		resize();
-		window.addEventListener("resize", resize);
-		document.body.appendChild(canvas);
+				fd.ok();
+				return canvas;
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		}
+		function createContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+			const fd = new Messege("CanvasRenderingContext2D");
+			try {
+				const ctx = canvas.getContext("2d")!;
+				if (!ctx) throw new Error("CanvasRenderingContext2D nicht da");
+
+				fd.ok();
+				return ctx;
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		}
+
+		const canvas = createElement();
+		const ctx = createContext(canvas);
+
 		return [canvas, ctx];
 	}
 
-	function loadCoreAssets() {
-		new Asset("./out/scripts/main.js", "script");
-		new Asset("./out/scripts/std.js", "script");
-		new Asset("./out/scripts/update.js", "script");
-		new Asset("./out/scripts/render.js", "script");
-		new Asset("./out/scripts/mouse.js", "script");
-		new Asset("./out/scripts/fenster.js", "script");
-		new Asset("./fonts/Roboto-Regular.ttf", "font", "Roboto");
-	}
-	function loadExtraAssets() {
-		new Asset("./fonts/Roboto-Italic.ttf", "font", "Roboto-Italic");
-		new Asset("./fonts/Roboto-Bold.ttf", "font", "Roboto-Bold");
-		new Asset("./fonts/Roboto-BoldItalic.ttf", "font", "Roboto-BoldItalic");
-		new Asset("./icons/Logo.png", "img", "Logo");
-		new Asset("./icons/Minimiren.png", "img", "Minimiren");
-		new Asset("./icons/Maximiren.png", "img", "Maximiren");
-		new Asset("./icons/Schlissen.png", "img", "Schlissen");
-	}
-
-	async function waitForAssets() {
-		const tStart = performance.now();
-		let requiredDone = false;
-		let requiredAssets: number | undefined;
-		let finishTime: number | undefined;
-		let finish = false;
-
-		while (true) {
-			ctx.fillStyle = "black";
-			ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-			// Title
-			const elapsed = performance.now() - tStart;
-			const p = Math.min(elapsed / 2000, 1);
-			const shade = Math.round(p * 255);
-			ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
-			ctx.font = "25px Roboto";
-			ctx.textAlign = "center";
-			ctx.textBaseline = "bottom";
-			ctx.fillText("Max-OS", canvas.width / 2, canvas.height * 0.38);
-			// Version
-			ctx.font = "15px Roboto";
-			ctx.textBaseline = "top";
-			ctx.fillText(`${VERSION} von Maximilian`, canvas.width / 2, canvas.height * 0.4);
-
-			// Timer
-			const allDone1 = assets.every((a) => a.done);
-			ctx.font = "10px Roboto";
-			ctx.textBaseline = "top";
-			if (finishTime)
-				ctx.fillText(
-					`${Math.ceil((finishTime + (allDone1 ? 3000 : 10000) - elapsed) / 1000)}s`,
-					canvas.width / 2,
-					canvas.height * 0.9,
-				);
-			ctx.textBaseline = "bottom";
-			if (finishTime) ctx.fillText(`Loading Assets`, canvas.width / 2, canvas.height * 0.89);
-
-			// Allways on Status
-			ctx.textAlign = "left";
-			ctx.textBaseline = "top";
-			ctx.font = "10px Roboto";
-			const loaded = assets.reduce((a, b) => a + (b.done ? 1 : 0), 0);
-			ctx.fillStyle = "rgb(50,50,50)";
-			ctx.fillText(`${loaded} / ${assets.length} Assets loaded`, 4, 4);
-
-			// Allways on Font
-			ctx.textBaseline = "bottom";
-			ctx.fillStyle = "rgb(50,50,50)";
-			ctx.font = "10px Roboto";
-			ctx.fillText((getAsset("Roboto")?.done ? " > " : "X ") + "Roboto", 4, canvas.height - 40);
-			ctx.font = "10px Roboto-Bold";
-			ctx.fillText((getAsset("Roboto-Bold")?.done ? " > " : "X ") + "Roboto-Bold", 4, canvas.height - 28);
-			ctx.font = "10px Roboto-Italic";
-			ctx.fillText((getAsset("Roboto-Italic")?.done ? " > " : "X ") + "Roboto-Italic", 4, canvas.height - 16);
-			ctx.font = "10px Roboto-BoldItalic";
-			ctx.fillText(
-				(getAsset("Roboto-BoldItalic")?.done ? " > " : "X ") + "Roboto-BoldItalic",
-				4,
-				canvas.height - 4,
-			);
-
-			if (elapsed > 2000 && assets.some((a) => !a.done)) {
-				// Core Status
-				ctx.textAlign = "center";
-				ctx.textBaseline = "bottom";
-				ctx.font = "12px Roboto";
-				ctx.fillStyle = requiredAssets ? "rgb(50,50,50)" : "rgb(150, 150, 150)";
-				ctx.fillText(
-					`${requiredAssets ?? loaded} / ${requiredAssets ?? assets.length} Core Assets loaded`,
-					canvas.width / 2,
-					canvas.height * 0.6,
-				);
-
-				// Extra Status
-				if (requiredAssets) {
-					ctx.textAlign = "center";
-					ctx.textBaseline = "top";
-					ctx.font = "12px Roboto";
-					ctx.fillStyle = loaded == assets.length ? "rgb(50,50,50)" : "rgb(150, 150, 150)";
-					ctx.fillText(
-						`${loaded - requiredAssets} / ${assets.length - requiredAssets} Extra Assets loaded`,
-						canvas.width / 2,
-						canvas.height * 0.61,
-					);
+	// === Client Canvas System ===
+	function createCanvas2(): [HTMLCanvasElement, CanvasRenderingContext2D] {
+		function createElement(): HTMLCanvasElement {
+			const fd = new Messege("Client Canvas");
+			try {
+				const canvas = document.createElement("canvas");
+				canvas.style.position = "absolute";
+				canvas.style.inset = "0px";
+				canvas.style.zIndex = 1;
+				function resize() {
+					canvas.width = innerWidth;
+					canvas.height = innerHeight;
 				}
+				resize();
+				addEventListener("resize", resize);
+				document.body.appendChild(canvas);
+
+				fd.ok();
+				return canvas;
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		}
+		function createContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+			const fd = new Messege("Client CanvasRenderingContext2D");
+			try {
+				const ctx = canvas.getContext("2d")!;
+				if (!ctx) throw new Error("CanvasRenderingContext2D nicht da");
+
+				fd.ok();
+				return ctx;
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		}
+
+		const canvas = createElement();
+		const ctx = createContext(canvas);
+
+		return [canvas, ctx];
+	}
+
+	// === Boot Render System ===
+	function createBootRender(ctx: CanvasRenderingContext2D): Promise<() => void> {
+		return new Promise((res) => {
+			const fd = new Messege("Boot Render");
+			try {
+				let stop = false;
+
+				function render() {
+					ctx.canvas.hidden = !location.hash.includes("debug;");
+					if (location.hash.includes("debug;")) {
+						const width = ctx.canvas.width;
+						const height = ctx.canvas.height;
+						const min = Math.min(width, height);
+
+						ctx.fillStyle = "black";
+						ctx.fillRect(0, 0, width, height);
+
+						ctx.fillStyle = "white";
+						ctx.textBaseline = "bottom";
+						ctx.textAlign = "left";
+						ctx.font = (min / 60).toString() + "px monospace";
+						let y = height;
+						for (let i = messeges.length; i > 0; i--) {
+							if (y < 0) {
+								messeges.splice(--i, 1);
+								continue;
+							}
+							messeges[i - 1].draw(ctx, y - 5);
+							y -= min / 60;
+						}
+					}
+					if (!stop) requestAnimationFrame(render);
+				}
+
+				requestAnimationFrame(() => {
+					render();
+					fd.ok();
+					res(() => (stop = true));
+				});
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		});
+	}
+
+	// === Client Render System ===
+	function createClientRender(ctx: CanvasRenderingContext2D): Promise<() => void> {
+		return new Promise((res) => {
+			const fd = new Messege("Client Render");
+			try {
+				let stop = false;
+				const start = performance.now();
+
+				function render() {
+					const width = ctx.canvas.width;
+					const height = ctx.canvas.height;
+					const min = Math.min(width, height);
+
+					ctx.fillStyle = "black";
+					ctx.fillRect(0, 0, width, height);
+
+					const i = Math.max(0, Math.min(256, (performance.now() - start) / 10));
+					ctx.fillStyle = "rgb(" + i + ", " + i + ", " + i + ")";
+					ctx.textBaseline = "bottom";
+					ctx.textAlign = "center";
+					ctx.font = (min / 25).toString() + "px Roboto";
+					ctx.fillText("Test", width / 2, height / 2.8);
+
+					ctx.textBaseline = "top";
+					ctx.textAlign = "center";
+					ctx.font = (min / 50).toString() + "px Roboto";
+					ctx.fillText("v1.0", width / 2, height / 2.8);
+
+					ctx.textBaseline = "middle";
+					ctx.font = (min / 50).toString() + "px Roboto";
+					ctx.fillText(messeges.find((i) => i.type === "start")?.text ?? "", width / 2, height / 1.1);
+
+					if (stop) {
+						ctx.fillStyle = "rgba(50, 50, 50, 1)";
+						ctx.textBaseline = "top";
+						ctx.textAlign = "left";
+						ctx.font = (min / 50).toString() + "px Roboto";
+						ctx.fillText("Stop", 5, 5);
+					} else requestAnimationFrame(render);
+				}
+
+				requestAnimationFrame(() => {
+					render();
+					fd.ok();
+					res(() => (stop = true));
+				});
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		});
+	}
+
+	// === Assets Loading System ===
+	const assets = [
+		"./out/fonts.js",
+		"./out/file.js",
+		"./out/fileSignur.js",
+		"./out/mouse.js",
+		"./out/keyboard.js",
+
+		"./out/console.js",
+		// "./out/tests/mouse.js",
+
+		"./out/wait.js",
+		// "./out/tests/returnNonfunction.js",
+	];
+	function loadAssets(): Promise<string[]> {
+		return new Promise((res, rej) => {
+			const fd = new Messege("Load Assets");
+			try {
+				const list: string[] = [];
+				let done = 0;
+
+				function check() {
+					if (++done >= assets.length) {
+						fd.ok();
+						res(list);
+					}
+				}
+				async function load(i: number) {
+					const ffd = new Messege(' - "' + assets[i] + '"');
+					try {
+						let retry = 0;
+						while (true) {
+							try {
+								ffd.type = "start";
+								const res = await fetch(assets[i]);
+								if (!res.ok) throw new Error();
+								list[i] = await res.text();
+								ffd.ok();
+								fd.text = "Load Assets (" + (done + 1) + "/" + assets.length + ")";
+								check();
+								return;
+							} catch (e) {
+								ffd.type = "error";
+								ffd.text = ' - "' + assets[i] + '" (' + ++retry + ")";
+
+								if (retry >= 10) throw new Error("To many Faild");
+								await new Promise((res) => setTimeout(res, 5000));
+							}
+						}
+					} catch (e) {
+						ffd.error((e as Error).message);
+						fd.error();
+						rej(e);
+						throw e;
+					}
+				}
+
+				for (let i = 0; i < assets.length; i++) {
+					load(i);
+				}
+			} catch (e) {
+				fd.error((e as Error).message);
+				throw e;
+			}
+		});
+	}
+
+	// === Assets Compile System ===
+	function complileAssets(codes: string[], names: string[]) {
+		const fd = new Messege("Complile Assets");
+		try {
+			const functions: ((
+				ctx: CanvasRenderingContext2D,
+				msg: Messege,
+				global: Map<string, unknown>,
+			) => ((ctx: CanvasRenderingContext2D, msg: Messege, global: Map<string, unknown>) => void) | void)[] = [];
+
+			for (let i = 0; i < codes.length; i++) {
+				const ffd = new Messege(' - "' + names[i] + '"');
+				try {
+					const res = new Function(codes[i])();
+					if (typeof res !== "function") {
+						ffd.warn("Return not a Function");
+					} else {
+						functions.push(res);
+						ffd.ok();
+					}
+				} catch (e) {
+					ffd.error((e as Error).message);
+					throw e;
+				}
+				fd.text = "Complile Assets (" + (i + 1) + "/" + codes.length + ")";
 			}
 
-			const anyNotDone = assets.some((a) => !a.done);
-			if (!requiredDone && !anyNotDone) {
-				requiredAssets = assets.length;
-				finishTime = elapsed;
-				loadExtraAssets();
-				requiredDone = true;
-			}
-
-			const allDone2 = assets.every((a) => a.done);
-			if (!finish && allDone2) {
-				finishTime = elapsed;
-				finish = true;
-			}
-			if (finishTime) if (elapsed - finishTime > (allDone2 ? 3000 : 10000) && requiredDone) break;
-
-			await new Promise(requestAnimationFrame);
+			fd.ok();
+			return functions;
+		} catch (e) {
+			fd.error((e as Error).message);
+			throw e;
 		}
 	}
 
-	const [canvas, ctx] = createCanvas();
-	loadCoreAssets();
-	await waitForAssets();
+	new Messege("=== Booting           ===").log();
+	new Messege(" -  Von Maximilian     - ").log();
+	new Messege("").log();
 
-	try {
-		if (assets.length == 0) throw new Error("No assets loaded!");
+	new Messege("").log();
+	new Messege("--- Booter Scripts    ---").log();
+	new Messege("").log();
 
-		ctx.fillStyle = "black";
-		ctx.fillRect(0, 0, canvas.width, canvas.height);
+	setupBody();
+	const [, ctx] = createCanvas();
+	const [, ctx2] = createCanvas2();
+	await createBootRender(ctx);
+	const stop2 = await createClientRender(ctx2);
+	const list = await loadAssets();
+	const functions = complileAssets(list, assets);
 
-		// Title
-		ctx.fillStyle = "rgb(255, 255, 255)";
-		ctx.font = "25px Roboto-Bold";
-		ctx.textAlign = "center";
-		ctx.textBaseline = "middle";
-		ctx.fillText("Max-OS", canvas.width / 2, canvas.height / 2);
+	new Messege("").log();
+	new Messege("--- Run Scripts       ---").log();
+	new Messege("").log();
 
-		// @ts-ignore
-		await main(ctx);
-	} catch (err) {
-		ctx.fillStyle = "black";
-		ctx.fillRect(0, 0, canvas.width, canvas.height);
+	const global: Map<string, unknown> = new Map();
+	const after: ((ctx: CanvasRenderingContext2D, msg: Messege, global: Map<string, unknown>) => unknown)[] = [];
+	for (let i = 0; i < functions.length; i++) {
+		try {
+			const output = await functions[i](ctx2, Messege, global);
+			if (output && typeof output === "function") after.push(output);
+		} catch (e) {
+			new Messege("System: Stoped because of a Error").error((e as Error).message);
+			throw e;
+		}
+	}
 
-		// Title
-		ctx.fillStyle = "rgb(255, 255, 255)";
-		ctx.font = "25px Roboto";
-		ctx.textAlign = "left";
-		ctx.textBaseline = "top";
-		ctx.fillText("Max-OS", 5, 5);
-		// Version
-		ctx.font = "12px Roboto";
-		ctx.fillText(`${VERSION} von Maximilian`, 5, 27);
+	new Messege("").log();
+	new Messege("--- Run After Scripts ---").log();
+	new Messege("").log();
 
-		// Mesege Type
-		ctx.fillStyle = "rgba(179, 0, 0, 1)";
-		ctx.font = "15px Roboto";
-		ctx.fillText((err as object).constructor.name, 5, 60);
-		// Mesege
-		ctx.fillStyle = "rgb(255, 255, 255)";
-		ctx.font = "10px Roboto";
-		ctx.fillText(String((err as Error).message ?? err), 5, 80);
-
-		throw err;
+	stop2();
+	for (let i = 0; i < after.length; i++) {
+		try {
+			after[i](ctx2, Messege, global);
+		} catch (e) {
+			/* empty */
+		}
 	}
 }
-
-boot();
+main();
